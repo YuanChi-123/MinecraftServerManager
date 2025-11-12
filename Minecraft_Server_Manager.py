@@ -13,6 +13,7 @@ import time
 import psutil
 from collections import deque
 import webbrowser
+import datetime
 
 class ResourceMonitorWindow:
     def __init__(self, parent, server_tab_id, process_pid):
@@ -375,477 +376,627 @@ class DownloadManager:
             for download_id in list(self.active_downloads.keys()):
                 self.active_downloads[download_id]['active'] = False
 
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
+import requests
+import threading
+import json
+
 class ServerCreationWizard:
-    def __init__(self, parent, callback):
-        self.parent = parent
+    def __init__(self, root, callback):
+        self.root = root
         self.callback = callback
-        self.download_manager = DownloadManager(parent)
         
         # 创建向导窗口
-        self.window = tk.Toplevel(parent)
+        self.window = tk.Toplevel(root)
         self.window.title("创建新服务器")
-        self.window.geometry("550x550")
-        self.window.resizable(False, False)
+        self.window.geometry("600x500")
+        self.window.transient(root)
+        self.window.grab_set()
         
-        # 主框架
-        self.main_frame = ttk.Frame(self.window)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        # 向导步骤
+        self.current_step = 0
+        self.steps = [
+            "服务器基本信息",
+            "服务器类型和版本",
+            "服务器位置",
+            "确认信息"
+        ]
         
-        # 内容区域（带滚动条）
-        self.canvas = tk.Canvas(self.main_frame, borderwidth=0)
-        self.scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-        
-        # 配置滚动区域
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # 布局
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
-        
-        # 存储服务器数据
+        # 服务器数据
         self.server_data = {
-            'name': '我的服务器',
-            'path': str(Path.home() / "servers"),
-            'core_type': 'Paper',
-            'core_version': '1.20.1',
-            'java_path': 'java',
-            'xmx': '2G',
-            'xms': '1G',
-            'custom_script': None,
-            'core_url': None
+            'name': '',
+            'core_type': 'vanilla',
+            'core_version': '',
+            'path': '',
+            'custom_script': '',
+            'core_url': '',
+            'actual_core_file': ''  # 新增：实际下载的文件名
         }
         
-        # 核心版本数据
-        self.core_versions = {
-            "Paper": {
-                "1.20.1": "https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/177/downloads/paper-1.20.1-177.jar",
-                "1.19.4": "https://api.papermc.io/v2/projects/paper/versions/1.19.4/builds/550/downloads/paper-1.19.4-550.jar"
-            },
-            "Spigot": {
-                "1.20.1": "https://cdn.getbukkit.org/spigot/spigot-1.20.1.jar"
-            }
+        # 可用版本缓存
+        self.available_versions = {
+            'vanilla': [],
+            'paper': [],
+            'spigot': []
         }
         
-        # 创建表单控件
-        self.create_basic_info_form()
+        # 初始化UI
+        self._setup_ui()
         
-        # 控制按钮区域
-        self.create_control_buttons()
+        # 加载可用版本
+        self._load_available_versions()
+    
+    def _setup_ui(self):
+        """设置向导界面"""
+        # 步骤指示器
+        self.step_label = ttk.Label(self.window, text=f"步骤 {self.current_step+1}/{len(self.steps)}: {self.steps[self.current_step]}", font=('Arial', 10, 'bold'))
+        self.step_label.pack(pady=10)
         
-        # 自动检测Java路径
-        self.window.after(100, self.auto_detect_java)
-
-        self.window.protocol("WM_DELETE_WINDOW", self.on_window_close)
-        self.server_process = None
-
-    def on_window_close(self):
-        """窗口关闭事件处理"""
-        if self.server_process and self.server_process.poll() is None:
-            if messagebox.askyesno(
-                "确认关闭",
-                "服务器仍在运行，关闭窗口将停止服务器。确定要继续吗？",
-                icon='warning'
-            ):
-                self.stop_server()
-            else:
-                return  # 用户取消关闭
-            
-            self.window.destroy()
-
-    def create_basic_info_form(self):
-        """创建完整的基本信息表单"""
-        # 服务器名称
-        ttk.Label(self.scrollable_frame, text="服务器名称:").grid(
-            row=0, column=0, sticky="w", pady=(10, 0), padx=10
-        )
-        self.name_var = tk.StringVar(value=self.server_data['name'])
-        ttk.Entry(self.scrollable_frame, textvariable=self.name_var, width=40).grid(
-            row=1, column=0, sticky="ew", padx=10, pady=(0, 10)
-        )
+        # 主容器
+        self.main_frame = ttk.Frame(self.window)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        # 服务器路径
-        path_frame = ttk.Frame(self.scrollable_frame)
-        path_frame.grid(row=2, column=0, sticky="ew", padx=10)
+        # 导航按钮
+        self.nav_frame = ttk.Frame(self.window)
+        self.nav_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(path_frame, text="服务器路径:").pack(side="left")
-        self.path_var = tk.StringVar(value=self.server_data['path'])
-        ttk.Entry(path_frame, textvariable=self.path_var).pack(
-            side="left", fill="x", expand=True, padx=5
-        )
+        self.prev_btn = ttk.Button(self.nav_frame, text="上一步", command=self._prev_step, state=tk.DISABLED)
+        self.prev_btn.pack(side=tk.LEFT)
+        
+        self.next_btn = ttk.Button(self.nav_frame, text="下一步", command=self._next_step)
+        self.next_btn.pack(side=tk.RIGHT)
+        
+        # 初始化所有步骤
+        self._init_step0()
+        self._init_step1()
+        self._init_step2()
+        self._init_step3()
+        
+        # 默认显示第一步
+        self._show_step(0)
+    
+    def _show_step(self, step):
+        """显示指定步骤"""
+        for widget in self.main_frame.winfo_children():
+            widget.pack_forget()
+        
+        self.current_step = step
+        self.step_label.config(text=f"步骤 {self.current_step+1}/{len(self.steps)}: {self.steps[self.current_step]}")
+        
+        # 更新按钮状态
+        self.prev_btn.config(state=tk.NORMAL if step > 0 else tk.DISABLED)
+        if step == len(self.steps) - 1:
+            self.next_btn.config(text="完成")
+        else:
+            self.next_btn.config(text="下一步")
+        
+        if step == 0:
+            self.step0_frame.pack(fill=tk.BOTH, expand=True)
+        elif step == 1:
+            self.step1_frame.pack(fill=tk.BOTH, expand=True)
+        elif step == 2:
+            self.step2_frame.pack(fill=tk.BOTH, expand=True)
+        elif step == 3:
+            self._update_confirmation()
+            self.step3_frame.pack(fill=tk.BOTH, expand=True)
+    
+    def _init_step0(self):
+        """初始化步骤0：基本信息"""
+        self.step0_frame = ttk.Frame(self.main_frame)
+        
+        ttk.Label(self.step0_frame, text="服务器名称:", font=('Arial', 9)).pack(anchor=tk.W, pady=(10, 5))
+        self.name_entry = ttk.Entry(self.step0_frame, font=('Arial', 9))
+        self.name_entry.pack(fill=tk.X, pady=5)
+        self.name_entry.bind('<KeyRelease>', lambda e: self._validate_step0())
+        
+        ttk.Label(self.step0_frame, text="服务器类型:", font=('Arial', 9)).pack(anchor=tk.W, pady=(10, 5))
+        self.core_type_var = tk.StringVar(value='vanilla')
+        core_type_frame = ttk.Frame(self.step0_frame)
+        core_type_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Radiobutton(core_type_frame, text="Vanilla (官方原版)", variable=self.core_type_var, value='vanilla', command=self._on_core_type_change).pack(anchor=tk.W)
+        ttk.Radiobutton(core_type_frame, text="Paper (优化版)", variable=self.core_type_var, value='paper', command=self._on_core_type_change).pack(anchor=tk.W)
+        ttk.Radiobutton(core_type_frame, text="Spigot (插件版)", variable=self.core_type_var, value='spigot', command=self._on_core_type_change).pack(anchor=tk.W)
+    
+    def _init_step1(self):
+        """初始化步骤1：版本选择"""
+        self.step1_frame = ttk.Frame(self.main_frame)
+        
+        ttk.Label(self.step1_frame, text="服务器版本:", font=('Arial', 9)).pack(anchor=tk.W, pady=(10, 5))
+        
+        # 版本选择框架
+        version_frame = ttk.Frame(self.step1_frame)
+        version_frame.pack(fill=tk.X, pady=5)
+        
+        self.version_var = tk.StringVar()
+        self.version_combobox = ttk.Combobox(version_frame, textvariable=self.version_var, state="readonly")
+        self.version_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.version_combobox.bind('<<ComboboxSelected>>', lambda e: self._validate_step1())
+        
+        # 刷新按钮
         ttk.Button(
-            path_frame,
-            text="浏览",
-            command=self.browse_server_path,
-            width=8
-        ).pack(side="right")
+            version_frame, 
+            text="刷新版本", 
+            command=self._load_available_versions
+        ).pack(side=tk.RIGHT)
         
-        # 服务器核心
-        core_frame = ttk.Frame(self.scrollable_frame)
-        core_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(10, 0))
+        # 版本加载状态
+        self.version_status = ttk.Label(self.step1_frame, text="正在加载版本列表...", foreground="blue")
+        self.version_status.pack(anchor=tk.W, pady=5)
         
-        ttk.Label(core_frame, text="核心类型:").pack(side="left")
-        self.core_type_var = tk.StringVar(value=self.server_data['core_type'])
-        ttk.Combobox(
-            core_frame,
-            textvariable=self.core_type_var,
-            values=list(self.core_versions.keys()),
-            state="readonly",
-            width=10
-        ).pack(side="left", padx=5)
+        # 版本说明
+        desc_frame = ttk.LabelFrame(self.step1_frame, text="版本说明")
+        desc_frame.pack(fill=tk.X, pady=10)
         
-        ttk.Label(core_frame, text="版本:").pack(side="left", padx=(10, 0))
-        self.core_version_var = tk.StringVar(value=self.server_data['core_version'])
-        self.version_combobox = ttk.Combobox(
-            core_frame,
-            textvariable=self.core_version_var,
-            state="readonly",
-            width=10
-        )
-        self.version_combobox.pack(side="left")
+        self.desc_text = tk.Text(desc_frame, height=4, wrap=tk.WORD, font=('Arial', 8))
+        self.desc_text.pack(fill=tk.BOTH, padx=5, pady=5)
+        self.desc_text.insert(tk.END, "请选择服务器版本。推荐选择稳定版本以获得最佳体验。")
+        self.desc_text.config(state=tk.DISABLED)
+    
+    def _init_step2(self):
+        """初始化步骤2：服务器位置"""
+        self.step2_frame = ttk.Frame(self.main_frame)
         
-        # Java路径
-        java_frame = ttk.Frame(self.scrollable_frame)
-        java_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(10, 0))
+        ttk.Label(self.step2_frame, text="服务器路径:", font=('Arial', 9)).pack(anchor=tk.W, pady=(10, 5))
         
-        ttk.Label(java_frame, text="Java路径:").pack(side="left")
-        self.java_var = tk.StringVar(value=self.server_data['java_path'])
-        ttk.Entry(java_frame, textvariable=self.java_var).pack(
-            side="left", fill="x", expand=True, padx=5
-        )
+        path_frame = ttk.Frame(self.step2_frame)
+        path_frame.pack(fill=tk.X, pady=5)
+        
+        self.path_var = tk.StringVar()
+        self.path_entry = ttk.Entry(path_frame, textvariable=self.path_var, font=('Arial', 9))
+        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.path_entry.bind('<KeyRelease>', lambda e: self._validate_step2())
+        
         ttk.Button(
-            java_frame,
-            text="浏览",
-            command=self.browse_java_path,
-            width=8
-        ).pack(side="right")
+            path_frame, 
+            text="浏览...", 
+            command=self._browse_path
+        ).pack(side=tk.RIGHT)
         
-        # 内存设置
-        mem_frame = ttk.Frame(self.scrollable_frame)
-        mem_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
+        # 路径验证信息
+        self.path_status = ttk.Label(self.step2_frame, text="", font=('Arial', 8))
+        self.path_status.pack(anchor=tk.W, pady=5)
         
-        ttk.Label(mem_frame, text="内存设置:").pack(side="left")
-        ttk.Label(mem_frame, text="Xms:").pack(side="left", padx=(10, 0))
-        self.xms_var = tk.StringVar(value=self.server_data['xms'])
-        ttk.Entry(mem_frame, textvariable=self.xms_var, width=8).pack(side="left")
+        # 默认路径为当前目录下的servers文件夹
+        default_path = str(Path.cwd() / "servers")
+        self.path_var.set(default_path)
+        self._validate_step2()
+    
+    def _init_step3(self):
+        """初始化步骤3：确认信息"""
+        self.step3_frame = ttk.Frame(self.main_frame)
         
-        ttk.Label(mem_frame, text="Xmx:").pack(side="left", padx=(10, 0))
-        self.xmx_var = tk.StringVar(value=self.server_data['xmx'])
-        ttk.Entry(mem_frame, textvariable=self.xmx_var, width=8).pack(side="left")
+        # 确认信息框
+        confirm_frame = ttk.LabelFrame(self.step3_frame, text="服务器配置信息")
+        confirm_frame.pack(fill=tk.X, pady=10)
         
-        # 高级配置按钮
-        ttk.Button(
-            self.scrollable_frame,
-            text="高级配置...",
-            command=self.show_advanced_settings
-        ).grid(row=6, column=0, pady=20)
-        
-        # 配置网格权重
-        self.scrollable_frame.grid_columnconfigure(0, weight=1)
-        
-        # 绑定核心类型变化事件
-        self.core_type_var.trace_add('write', self.update_core_versions)
-        self.update_core_versions()
-
-    def create_control_buttons(self):
-        """创建垂直排列的控制按钮"""
-        # 主按钮框架
-        btn_frame = ttk.Frame(self.main_frame)
-        btn_frame.pack(fill="x", pady=(20, 10))
-        
-        # 使用内部框架实现垂直布局
-        inner_frame = ttk.Frame(btn_frame)
-        inner_frame.pack(side="right", padx=20)
-        
-        # 取消按钮在上
-        ttk.Button(
-            inner_frame,
-            text="取消",
-            command=self.window.destroy
-        ).pack(pady=(0, 5), fill="x")  # 添加下方间距
-        
-        # 创建按钮在下
-        ttk.Button(
-            inner_frame,
-            text="创建",
-            command=self.finish_creation
-        ).pack(fill="x")  # 填充水平空间
-
-    def browse_server_path(self):
-        """浏览服务器路径"""
-        path = filedialog.askdirectory(
-            title="选择服务器存储位置",
-            initialdir=self.path_var.get()
+        self.confirmation_text = tk.Text(
+            confirm_frame,
+            height=6,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            font=('Arial', 9)
         )
-        if path:
-            self.path_var.set(path)
-
-    def browse_java_path(self):
-        """浏览Java路径"""
-        path = filedialog.askopenfilename(
-            title="选择Java可执行文件",
-            filetypes=[("可执行文件", "*.exe"), ("所有文件", "*.*")]
-        )
-        if path:
-            self.java_var.set(path)
-
-    def update_core_versions(self, *args):
-        """更新核心版本选项"""
-        versions = list(self.core_versions[self.core_type_var.get()].keys())
-        self.version_combobox['values'] = versions
-        if self.core_version_var.get() not in versions:
-            self.core_version_var.set(versions[0])
-
-    def auto_detect_java(self):
-        """自动检测Java路径"""
-        try:
-            # 检查JAVA_HOME环境变量
-            if java_home := os.getenv('JAVA_HOME'):
-                java_path = Path(java_home) / 'bin' / 'java'
-                if os.name == 'nt':  # Windows系统
-                    java_path = java_path.with_suffix('.exe')
-                if java_path.exists():
-                    self.java_var.set(str(java_path))
-                    return
-            
-            # 通过系统PATH查找
-            if java_path := shutil.which('java'):
-                self.java_var.set(java_path)
-        except Exception:
-            pass
-
-    def show_advanced_settings(self):
-        """显示高级配置窗口"""
-        adv_window = tk.Toplevel(self.window)
-        adv_window.title("高级配置")
-        adv_window.resizable(False, False)
+        self.confirmation_text.pack(fill=tk.BOTH, padx=5, pady=5)
         
-        # 脚本编辑区域
-        script_frame = ttk.LabelFrame(adv_window, text="自定义启动脚本 (start.bat)")
-        script_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # 自定义启动脚本
+        script_frame = ttk.LabelFrame(self.step3_frame, text="自定义启动脚本")
+        script_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        scrollbar = ttk.Scrollbar(script_frame)
-        scrollbar.pack(side="right", fill="y")
+        script_scrollbar = ttk.Scrollbar(script_frame)
+        script_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         self.script_text = tk.Text(
             script_frame,
-            yscrollcommand=scrollbar.set,
-            wrap="word",
-            height=15,
-            width=60
+            height=6,
+            wrap=tk.WORD,
+            yscrollcommand=script_scrollbar.set,
+            font=('Courier New', 9)
         )
-        self.script_text.pack(fill="both", expand=True)
-        scrollbar.config(command=self.script_text.yview)
+        self.script_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        script_scrollbar.config(command=self.script_text.yview)
         
-        # 生成默认脚本
-        default_script = (
-            '@echo off\n'
-            f'"{self.java_var.get()}" -Xmx{self.xmx_var.get()} '
-            f'-Xms{self.xms_var.get()} -jar {self.core_type_var.get()}-{self.core_version_var.get()}.jar\n'
-            'pause'
-        )
-        self.script_text.insert("end", default_script)
+        # 设置默认启动脚本
+        default_script = """@echo off
+title Minecraft Server - %CD%
+java -Xms1G -Xmx2G -jar {core_name} nogui
+echo Server has stopped.
+echo Press any key to exit...
+pause >nul"""
+        self.script_text.insert(tk.END, default_script)
         
-        # 控制按钮
-        btn_frame = ttk.Frame(adv_window)
-        btn_frame.pack(fill="x", pady=(0, 10))
+        # 脚本说明
+        ttk.Label(self.step3_frame, text="提示: {core_name} 会被自动替换为实际的服务器核心文件名", 
+                 font=('Arial', 8), foreground="gray").pack(anchor=tk.W)
+    
+    def _update_confirmation(self):
+        """更新确认信息"""
+        self.confirmation_text.config(state=tk.NORMAL)
+        self.confirmation_text.delete(1.0, tk.END)
         
-        ttk.Button(
-            btn_frame,
-            text="确定",
-            command=lambda: self.save_advanced_settings(adv_window)
-        ).pack(side="right", padx=5)
+        info = f"""服务器名称: {self.server_data['name']}
+服务器类型: {self.server_data['core_type']}
+服务器版本: {self.server_data['core_version']}
+服务器路径: {self.server_data['path']}
+完整路径: {Path(self.server_data['path']) / self.server_data['name']}
+
+下载URL: {self.server_data.get('core_url', '待生成')}
+"""
+        self.confirmation_text.insert(tk.END, info)
+        self.confirmation_text.config(state=tk.DISABLED)
+    
+    def _on_core_type_change(self):
+        """服务器类型改变时的处理"""
+        self._load_available_versions()
+        self._validate_step0()
+    
+    def _validate_step0(self):
+        """验证步骤0"""
+        name = self.name_entry.get().strip()
+        if name:
+            self.next_btn.config(state=tk.NORMAL)
+        else:
+            self.next_btn.config(state=tk.DISABLED)
+    
+    def _validate_step1(self):
+        """验证步骤1"""
+        if self.version_var.get():
+            self.next_btn.config(state=tk.NORMAL)
+        else:
+            self.next_btn.config(state=tk.DISABLED)
+    
+    def _validate_step2(self):
+        """验证步骤2"""
+        path = self.path_var.get().strip()
+        if path:
+            # 检查路径是否有效
+            try:
+                Path(path)
+                self.path_status.config(text="路径有效", foreground="green")
+                self.next_btn.config(state=tk.NORMAL)
+            except Exception:
+                self.path_status.config(text="路径无效", foreground="red")
+                self.next_btn.config(state=tk.DISABLED)
+        else:
+            self.path_status.config(text="请输入路径", foreground="red")
+            self.next_btn.config(state=tk.DISABLED)
+    
+    def _browse_path(self):
+        """浏览选择服务器路径"""
+        path = filedialog.askdirectory(title="选择服务器存放目录")
+        if path:
+            self.path_var.set(path)
+            self._validate_step2()
+    
+    def _load_available_versions(self):
+        """加载可用的服务器版本"""
+        core_type = self.core_type_var.get()
         
-        ttk.Button(
-            btn_frame,
-            text="取消",
-            command=adv_window.destroy
-        ).pack(side="right")
-
-    def save_advanced_settings(self, window):
-        """保存高级配置"""
-        self.server_data['custom_script'] = self.script_text.get("1.0", "end-1c")
-        window.destroy()
-        messagebox.showinfo("提示", "高级配置已保存")
-
-    def validate_server_path(self):
-        """验证服务器路径有效性"""
-        path = Path(self.path_var.get())
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            test_file = path / "msm_test.tmp"
-            test_file.touch()
-            test_file.unlink()
-            return True
-        except Exception as e:
-            messagebox.showerror("路径错误", f"路径不可用: {str(e)}")
-            return False
-
-    def finish_creation(self):
-        """完成服务器创建流程（集成下载管理器版）"""
-        # 1. 收集表单数据
-        self.server_data.update({
-            'name': self.name_var.get(),
-            'path': self.path_var.get(),
-            'core_type': self.core_type_var.get(),
-            'core_version': self.core_version_var.get(),
-            'java_path': self.java_var.get(),
-            'xmx': self.xmx_var.get(),
-            'xms': self.xms_var.get()
-        })
-
-        # 2. 验证输入数据
-        if not self._validate_inputs():
+        def worker():
+            try:
+                self.root.after(0, lambda: self.version_status.config(text="正在加载版本列表...", foreground="blue"))
+                
+                if core_type == 'vanilla':
+                    response = requests.get("https://launchermeta.mojang.com/mc/game/version_manifest.json", timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
+                    versions = [v['id'] for v in data['versions'] if v['type'] == 'release'][:20]  # 只显示最近20个版本
+                    
+                elif core_type == 'paper':
+                    response = requests.get("https://api.papermc.io/v2/projects/paper", timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
+                    versions = data['versions'][-10:]  # 显示最近10个版本
+                    
+                elif core_type == 'spigot':
+                    versions = self._get_spigot_versions()
+                
+                self.available_versions[core_type] = versions
+                
+                # 更新UI
+                self.root.after(0, lambda: self._update_version_combobox(versions))
+                self.root.after(0, lambda: self.version_status.config(text=f"找到 {len(versions)} 个可用版本", foreground="green"))
+                
+                # 更新版本说明
+                desc = f"{core_type.capitalize()} 服务器 - 推荐选择最新稳定版本"
+                self.root.after(0, lambda: self._update_version_desc(desc))
+                
+            except Exception as e:
+                error_msg = f"加载版本失败: {str(e)}"
+                self.root.after(0, lambda: self.version_status.config(text=error_msg, foreground="red"))
+                self.root.after(0, lambda: self._update_version_combobox([]))
+        
+        threading.Thread(target=worker, daemon=True).start()
+    
+    def _update_version_combobox(self, versions):
+        """更新版本选择框"""
+        self.version_combobox['values'] = versions
+        if versions:
+            self.version_combobox.set(versions[-1])  # 默认选择最新版本
+            self.version_combobox.config(state="readonly")
+        else:
+            self.version_combobox.set("")
+            self.version_combobox.config(state="disabled")
+    
+    def _update_version_desc(self, desc):
+        """更新版本说明"""
+        self.desc_text.config(state=tk.NORMAL)
+        self.desc_text.delete(1.0, tk.END)
+        self.desc_text.insert(tk.END, desc)
+        self.desc_text.config(state=tk.DISABLED)
+    
+    def _prev_step(self):
+        """上一步"""
+        if self.current_step > 0:
+            self._show_step(self.current_step - 1)
+    
+    def _next_step(self):
+        """下一步"""
+        if not self._validate_current_step():
             return
-
-        # 3. 准备服务器目录
-        server_dir = Path(self.server_data['path']) / self.server_data['name']
-        try:
-            server_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            messagebox.showerror("路径错误", f"无法创建服务器目录: {str(e)}")
-            return
-
-        # 4. 获取核心下载URL
-        try:
-            self.server_data['core_url'] = self.core_versions[
-                self.server_data['core_type']
-            ][self.server_data['core_version']]
-        except KeyError:
-            messagebox.showerror("错误", "无法获取核心下载地址，请选择其他版本")
-            return
-
-        # 5. 生成默认启动脚本（如果未自定义）
-        if not self.server_data.get('custom_script'):
-            self.server_data['custom_script'] = self._generate_default_script()
-
-        # 6. 显示下载窗口
-        self._show_download_window()
-
-        # 7. 启动下载
-        core_name = f"{self.server_data['core_type']}-{self.server_data['core_version']}.jar"
-        download_path = str(server_dir / core_name)
         
-        if not self.download_manager.start_download(
-            url=self.server_data['core_url'],
-            save_path=download_path,
-            progress_callback=self._update_download_progress,
-            completion_callback=self._handle_download_completion
-        ):
-            messagebox.showerror("错误", "下载已在进行中")
-            self._cleanup_failed_creation(server_dir)
-
-    def _validate_inputs(self):
-        """验证所有输入字段"""
-        # 检查服务器名称
-        if not self.server_data['name'].strip():
-            messagebox.showerror("错误", "服务器名称不能为空")
-            return False
-        
-        # 检查路径有效性
-        try:
-            test_file = Path(self.server_data['path']) / "msm_test.tmp"
-            test_file.touch()
-            test_file.unlink()
-        except Exception as e:
-            messagebox.showerror("路径错误", f"路径不可用: {str(e)}")
-            return False
-        
-        # 检查Java路径
-        if not shutil.which(self.server_data['java_path']):
-            if not messagebox.askyesno(
-                "警告", 
-                "Java路径未验证，可能无效。是否继续？",
-                icon='warning'
-            ):
+        if self.current_step < len(self.steps) - 1:
+            self._show_step(self.current_step + 1)
+        else:
+            self._finish_creation()
+    
+    def _validate_current_step(self):
+        """验证当前步骤数据"""
+        if self.current_step == 0:
+            name = self.name_entry.get().strip()
+            if not name:
+                messagebox.showerror("错误", "请输入服务器名称")
                 return False
+            self.server_data['name'] = name
+            self.server_data['core_type'] = self.core_type_var.get()
+        
+        elif self.current_step == 1:
+            version = self.version_var.get()
+            if not version:
+                messagebox.showerror("错误", "请选择服务器版本")
+                return False
+            self.server_data['core_version'] = version
+            
+            # 生成下载URL
+            core_url = self._get_core_url()
+            if not core_url:
+                messagebox.showerror("错误", "无法生成下载链接，请检查版本号是否正确")
+                return False
+            self.server_data['core_url'] = core_url
+        
+        elif self.current_step == 2:
+            path = self.path_var.get().strip()
+            if not path:
+                messagebox.showerror("错误", "请选择服务器路径")
+                return False
+            
+            # 验证路径
+            try:
+                Path(path)
+            except Exception:
+                messagebox.showerror("错误", "路径无效，请选择有效的目录")
+                return False
+            
+            self.server_data['path'] = path
         
         return True
-
-    def _generate_default_script(self):
-        """生成默认启动脚本"""
-        return (
-            '@echo off\n'
-            f'"{self.server_data["java_path"]}" '
-            f'-Xmx{self.server_data["xmx"]} '
-            f'-Xms{self.server_data["xms"]} '
-            f'-jar {self.server_data["core_type"]}-{self.server_data["core_version"]}.jar\n'
-            'pause'
-        )
-
-    def _show_download_window(self):
-        """显示下载进度窗口"""
-        self.download_window = tk.Toplevel(self.window)
-        self.download_window.title("下载服务器核心")
-        self.download_window.geometry("400x150")
-        self.download_window.resizable(False, False)
+    
+    def _get_core_url(self):
+        """获取服务器核心下载URL"""
+        core_type = self.server_data['core_type']
+        version = self.server_data['core_version']
         
-        # 防止窗口被关闭
-        self.download_window.protocol("WM_DELETE_WINDOW", lambda: None)
-        
-        # 进度组件
-        ttk.Label(
-            self.download_window, 
-            text=f"正在下载 {self.server_data['core_type']} {self.server_data['core_version']}...",
-            font=('TkDefaultFont', 10, 'bold')
-        ).pack(pady=(15, 10))
-        
-        self.progress_bar = ttk.Progressbar(
-            self.download_window,
-            orient='horizontal',
-            length=350,
-            mode='determinate'
-        )
-        self.progress_bar.pack()
-        
-        self.status_label = ttk.Label(
-            self.download_window,
-            text="准备下载...",
-            font=('TkDefaultFont', 9)
-        )
-        self.status_label.pack(pady=(10, 0))
-        
-        cancel_btn = ttk.Button(
-            self.download_window,
-            text="取消",
-            command=self._cancel_download
-        )
-        cancel_btn.pack(pady=(10, 15))
-
-    def _update_download_progress(self, progress):
-        """更新下载进度"""
-        if hasattr(self, 'download_window') and self.download_window.winfo_exists():
-            self.progress_bar['value'] = progress
-            self.status_label.config(
-                text=f"下载中: {progress:.1f}% - {self._format_speed(progress)}"
-            )
-            self.download_window.update()
-
-    def _format_speed(self, progress):
-        """计算并格式化下载速度"""
-        if not hasattr(self, '_download_start_time'):
-            self._download_start_time = time.time()
-            return "速度计算中..."
-        
-        elapsed = time.time() - self._download_start_time
-        if elapsed < 1 or progress <= 0:
+        try:
+            if core_type == 'vanilla':
+                return self._get_vanilla_url(version)
+            elif core_type == 'paper':
+                return self._get_paper_url(version)
+            elif core_type == 'spigot':
+                return self._get_spigot_url(version)
+        except Exception as e:
+            print(f"生成下载URL失败: {e}")
             return ""
         
-        estimated_size = (self.progress_bar['maximum'] or 1) * (progress / 100)
-        speed_kbps = (estimated_size / 1024) / elapsed
-        return f"{speed_kbps:.1f} KB/s"
-
-    def _handle_download_completion(self, success, error_msg=None):
-        """处理下载完成事件"""
-        # 清理计时器
-        if hasattr(self, '_download_start_time'):
-            del self._download_start_time
+        return ""
+    
+    def _get_paper_url(self, version):
+        """修复Paper下载URL生成"""
+        try:
+            # 方法1：尝试获取最新构建信息
+            builds_url = f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds"
+            try:
+                response = requests.get(builds_url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data['builds']:
+                        latest_build = data['builds'][-1]
+                        build_number = latest_build['build']
+                        return f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds/{build_number}/downloads/paper-{version}-{build_number}.jar"
+            except:
+                pass
+            
+            # 方法2：使用latest标签（备用方案）
+            return f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds/latest/downloads/paper-{version}-latest.jar"
+            
+        except Exception as e:
+            print(f"获取Paper URL失败，使用备用方案: {e}")
+            # 方法3：硬编码已知可用的URL
+            return f"https://api.papermc.io/v2/projects/paper/versions/{version}/builds/latest/downloads/paper-{version}-latest.jar"
+    
+    def _get_vanilla_url(self, version):
+        """获取Vanilla核心下载URL"""
+        try:
+            response = requests.get("https://launchermeta.mojang.com/mc/game/version_manifest.json", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            for version_info in data['versions']:
+                if version_info['id'] == version:
+                    detail_response = requests.get(version_info['url'], timeout=10)
+                    detail_data = detail_response.json()
+                    return detail_data['downloads']['server']['url']
+            
+            return f"https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"  # 默认URL
+            
+        except Exception:
+            return f"https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
+    
+    def _get_spigot_url(self, version):
+        """获取Spigot核心下载URL"""
+        # 使用可靠的下载源
+        base_urls = [
+            f"https://download.cdn.getbukkit.org/spigot/spigot-{version}.jar",
+            f"https://cdn.getbukkit.org/spigot/spigot-{version}.jar"
+        ]
+        return base_urls[0]
+    
+    def _get_spigot_versions(self):
+        """获取Spigot版本列表"""
+        return ['1.20.1', '1.19.4', '1.18.2', '1.17.1', '1.16.5', '1.15.2', '1.14.4']
+    
+    def _finish_creation(self):
+        """完成创建"""
+        # 获取自定义脚本
+        self.server_data['custom_script'] = self.script_text.get("1.0", tk.END).strip()
         
+        # 开始下载
+        self._start_download()
+    
+    def _start_download(self):
+        """开始下载服务器核心"""
+        # 创建下载窗口
+        self.download_window = tk.Toplevel(self.window)
+        self.download_window.title("下载服务器核心")
+        self.download_window.geometry("500x300")
+        self.download_window.transient(self.window)
+        self.download_window.grab_set()
+        
+        # 下载信息
+        info_frame = ttk.Frame(self.download_window)
+        info_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(info_frame, text="正在下载服务器核心文件...", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
+        
+        # 显示详细信息
+        details_text = f"""服务器类型: {self.server_data['core_type']}
+版本: {self.server_data['core_version']}
+下载URL: {self.server_data['core_url']}"""
+        
+        details_label = ttk.Label(info_frame, text=details_text, justify=tk.LEFT)
+        details_label.pack(anchor=tk.W, pady=5)
+        
+        # 进度条
+        progress_frame = ttk.Frame(self.download_window)
+        progress_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        ttk.Label(progress_frame, text="下载进度:").pack(anchor=tk.W)
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(
+            progress_frame,
+            variable=self.progress_var,
+            maximum=100,
+            length=400
+        )
+        self.progress_bar.pack(fill=tk.X, pady=5)
+        
+        self.progress_label = ttk.Label(progress_frame, text="准备下载...")
+        self.progress_label.pack(anchor=tk.W)
+        
+        # 控制按钮
+        btn_frame = ttk.Frame(self.download_window)
+        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.cancel_btn = ttk.Button(btn_frame, text="取消", command=self._cancel_download)
+        self.cancel_btn.pack(side=tk.RIGHT)
+        
+        # 在后台线程中下载
+        self.download_cancelled = False
+        threading.Thread(target=self._download_core, daemon=True).start()
+    
+    def _cancel_download(self):
+        """取消下载"""
+        self.download_cancelled = True
+        if hasattr(self, 'download_window') and self.download_window.winfo_exists():
+            self.download_window.destroy()
+        messagebox.showinfo("提示", "下载已取消")
+    
+    def _download_core(self):
+        """下载服务器核心"""
+        try:
+            # 准备服务器目录
+            server_dir = Path(self.server_data['path']) / self.server_data['name']
+            server_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 从URL中提取实际文件名
+            core_url = self.server_data['core_url']
+            expected_filename = core_url.split('/')[-1]
+            save_path = server_dir / expected_filename
+            
+            self.root.after(0, lambda: self.progress_label.config(text=f"下载文件: {expected_filename}"))
+            
+            # 开始下载
+            response = requests.get(core_url, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if self.download_cancelled:
+                        raise Exception("下载被用户取消")
+                    
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # 更新进度
+                        if total_size > 0:
+                            progress = (downloaded / total_size) * 100
+                            self.root.after(0, lambda: self.progress_var.set(progress))
+                            self.root.after(0, lambda: self.progress_label.config(
+                                text=f"下载中: {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({progress:.1f}%)"
+                            ))
+            
+            # 验证下载的文件
+            if not self._validate_jar_file(save_path):
+                raise Exception("下载的文件不是有效的JAR文件")
+            
+            # 记录实际文件名
+            self.server_data['actual_core_file'] = expected_filename
+            
+            # 下载成功
+            self.root.after(0, lambda: self._handle_download_completion(True, None))
+            
+        except Exception as e:
+            if not self.download_cancelled:
+                self.root.after(0, lambda: self._handle_download_completion(False, str(e)))
+    
+    def _validate_jar_file(self, file_path):
+        """验证JAR文件是否有效"""
+        try:
+            if not os.path.exists(file_path):
+                return False
+            
+            file_size = os.path.getsize(file_path)
+            if file_size < 1024:  # 小于1KB的文件无效
+                return False
+            
+            # 检查JAR文件头
+            with open(file_path, 'rb') as f:
+                header = f.read(4)
+                if header[:2] != b'PK':  # JAR文件以PK开头
+                    return False
+            
+            return True
+        except Exception:
+            return False
+    
+    def _handle_download_completion(self, success, error_msg=None):
+        """处理下载完成事件（修复版）"""
         # 关闭下载窗口
         if hasattr(self, 'download_window') and self.download_window.winfo_exists():
             self.download_window.destroy()
@@ -857,125 +1008,175 @@ class ServerCreationWizard:
         # 下载成功后的处理
         server_dir = Path(self.server_data['path']) / self.server_data['name']
         try:
-            # 保存启动脚本
+            # 确保目录存在
+            server_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 查找实际的JAR文件（修复文件检测问题）
+            jar_files = list(server_dir.glob("*.jar"))
+            if not jar_files:
+                raise Exception("未找到任何服务器核心文件（.jar文件）")
+            
+            # 使用实际找到的JAR文件
+            actual_core_file = jar_files[0].name
+            self.server_data['actual_core_file'] = actual_core_file
+            
+            # 保存启动脚本（使用实际找到的核心文件名）
+            script_content = self.server_data['custom_script'].replace("{core_name}", actual_core_file)
+            
             bat_path = server_dir / "start.bat"
-            bat_path.write_text(self.server_data['custom_script'], encoding='utf-8')
+            bat_path.write_text(script_content, encoding='utf-8')
+            
+            # 创建服务器配置文件
+            self._create_server_config(server_dir)
             
             # 回调主程序
             self.callback(self.server_data)
+            
+            # 显示成功消息
             messagebox.showinfo(
-                "成功", 
-                f"服务器 '{self.server_data['name']}' 创建完成！\n"
-                f"路径: {server_dir}"
+                "服务器创建成功", 
+                f"✅ 服务器创建完成！\n\n"
+                f"名称: {self.server_data['name']}\n"
+                f"类型: {self.server_data['core_type']}\n"
+                f"版本: {self.server_data['core_version']}\n"
+                f"路径: {server_dir}\n"
+                f"核心文件: {actual_core_file}\n\n"
+                f"现在可以启动服务器了！"
             )
+            
+            # 关闭向导窗口
             self.window.destroy()
             
         except Exception as e:
-            self._handle_download_failure(f"无法保存启动脚本: {str(e)}")
+            self._handle_download_failure(f"无法完成服务器创建: {str(e)}")
             self._cleanup_failed_creation(server_dir)
-
+    
+    def _create_server_config(self, server_dir):
+        """创建服务器配置文件"""
+        config = {
+            'server_name': self.server_data['name'],
+            'server_type': self.server_data['core_type'],
+            'server_version': self.server_data['core_version'],
+            'core_file': self.server_data['actual_core_file'],
+            'created_time': time.strftime("%Y-%m-%d %H:%M:%S"),
+            'path': str(server_dir)
+        }
+        
+        config_path = server_dir / "msm_config.json"
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+    
     def _handle_download_failure(self, error_msg):
         """处理下载失败"""
-        messagebox.showerror(
-            "下载失败", 
-            f"无法下载服务器核心:\n{error_msg}\n\n"
-            "请检查：\n"
-            "1. 网络连接是否正常\n"
-            "2. 下载地址是否有效\n"
-            "3. 磁盘空间是否充足"
-        )
-        if hasattr(self, 'server_data') and 'path' in self.server_data:
+        # 构建详细的错误信息
+        detailed_error = f"""无法下载服务器核心:
+
+错误信息: {error_msg}
+
+请检查:
+1. 网络连接是否正常
+2. 下载地址是否有效
+3. 磁盘空间是否充足
+4. 防火墙或安全软件设置
+
+服务器信息:
+- 类型: {self.server_data['core_type']}
+- 版本: {self.server_data['core_version']}
+- 下载URL: {self.server_data.get('core_url', 'N/A')}"""
+        
+        messagebox.showerror("下载失败", detailed_error)
+        
+        # 清理失败的文件
+        if 'server_dir' in locals():
             server_dir = Path(self.server_data['path']) / self.server_data['name']
             self._cleanup_failed_creation(server_dir)
-
+    
     def _cleanup_failed_creation(self, server_dir):
-        """清理创建失败的残留文件"""
+        """清理创建失败的服务器目录"""
         try:
             if server_dir.exists():
-                shutil.rmtree(server_dir, ignore_errors=True)
+                # 只删除下载的核心文件，保留其他可能的手动文件
+                for jar_file in server_dir.glob("*.jar"):
+                    try:
+                        jar_file.unlink()
+                    except:
+                        pass
+                # 删除配置文件
+                for config_file in server_dir.glob("*.json"):
+                    try:
+                        config_file.unlink()
+                    except:
+                        pass
         except Exception as e:
-            print(f"清理失败: {str(e)}")
+            print(f"清理失败: {e}")
 
-    def _cancel_download(self):
-        """取消下载操作"""
-        if hasattr(self, 'server_data') and 'core_url' in self.server_data:
-            if messagebox.askyesno(
-                "确认取消",
-                "确定要取消服务器创建吗？\n已下载的文件将被删除。",
-                icon='warning'
-            ):
-                self.download_manager.cancel_download(self.server_data['core_url'])
-                if hasattr(self, 'download_window') and self.download_window.winfo_exists():
-                    self.download_window.destroy()
-                
-                server_dir = Path(self.server_data['path']) / self.server_data['name']
-                self._cleanup_failed_creation(server_dir)
-
-    def monitor_server_output(self, process):
-        """监控服务器输出，修复编码问题"""
-        while True:
-            try:
-                # 读取字节并指定UTF-8编码，忽略无法解码的字符
-                output = process.stdout.readline()
-                if not output and process.poll() is not None:
-                    break
-                if output:
-                    # 使用UTF-8解码，遇到错误时忽略
-                    decoded_output = output.decode('utf-8', errors='ignore').strip()
-                    # 移除ANSI转义序列
-                    cleaned_output = clean_ansi_codes(decoded_output)
-                    # 在主线程更新UI
-                    self.root.after(0, self.log_to_console, cleaned_output)
-            except Exception as e:
-                error_msg = f"输出处理错误: {str(e)}"
-                self.root.after(0, self.log_to_console, error_msg)
-                break
 
 class MinecraftServerManager:
     def __init__(self, root):
-        self.root = root
-        self.root.title("Minecraft Server Manager v1.0-T202510061206")
-        self.root.geometry("800x600")
-        icon_path = "download.ico"
-        try:
-            self.root.iconbitmap(icon_path)
-        except Exception as e:
-            messagebox.showerror("错误", f"Error:{e}。如果在.exe应用中看到此报错，请尽快联系开发者！")
-        
-        self.msm_dir = Path.home() / ".msm"
-        self.msm_dir.mkdir(exist_ok=True)
-        self.config_file = self.msm_dir / "MSM.ini"
-        
-        self.config = configparser.ConfigParser()
-        if self.config_file.exists():
-            self.config.read(self.config_file)
-        
-        self.main_frame = ttk.Frame(root)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.notebook = ttk.Notebook(self.main_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
-        
-        control_frame = ttk.Frame(self.main_frame)
-        control_frame.pack(fill=tk.X, pady=5)
-        
-        ttk.Button(
-            control_frame,
-            text="创建服务器",
-            command=self.show_server_wizard
-        ).pack(side=tk.LEFT, padx=10)
-        
-        self.tabs = {}
-        self.server_processes = {}
-        self.load_servers()
-
-        ttk.Button(
-            control_frame,
-            text="添加已有服务器",
-            command=self.add_existing_server
-        ).pack(side=tk.LEFT, padx=10)
-
-        root.protocol("WM_DELETE_WINDOW", self.on_main_window_close)
+            self.root = root
+            self.root.title("Minecraft Server Manager v1.1")
+            self.root.geometry("800x600")
+            
+            # 图标设置
+            icon_path = r"download.ico"
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception as e:
+                messagebox.showerror("错误", f"Error:{e}。如果在.exe应用中看到此报错，请尽快联系开发者！")
+            
+            # 配置目录和文件
+            self.msm_dir = Path.home() / ".msm"
+            self.msm_dir.mkdir(exist_ok=True)
+            self.config_file = self.msm_dir / "MSM.ini"
+            
+            # 配置解析器
+            self.config = configparser.ConfigParser()
+            
+            # 安全地读取配置文件
+            if self.config_file.exists():
+                try:
+                    self.config.read(self.config_file, encoding='utf-8')
+                except Exception as e:
+                    print(f"读取配置文件失败: {e}")
+                    # 创建新的配置文件
+                    self.config = configparser.ConfigParser()
+            
+            # UI初始化
+            self.main_frame = ttk.Frame(root)
+            self.main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            self.notebook = ttk.Notebook(self.main_frame)
+            self.notebook.pack(fill=tk.BOTH, expand=True)
+            
+            # 控制按钮区域
+            control_frame = ttk.Frame(self.main_frame)
+            control_frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Button(
+                control_frame,
+                text="创建服务器",
+                command=self.show_server_wizard
+            ).pack(side=tk.LEFT, padx=10)
+            
+            ttk.Button(
+                control_frame,
+                text="添加已有服务器",
+                command=self.add_existing_server
+            ).pack(side=tk.LEFT, padx=10)
+            
+            # 初始化数据结构
+            self.tabs = {}
+            self.server_processes = {}
+            
+            # 安全地加载服务器
+            try:
+                self.load_servers()
+            except Exception as e:
+                print(f"加载服务器时发生错误: {e}")
+                # 继续运行程序，只是无法加载已有服务器
+            
+            # 窗口关闭事件
+            root.protocol("WM_DELETE_WINDOW", self.on_main_window_close)
 
     def on_main_window_close(self):
         """主窗口关闭事件处理"""
@@ -1018,130 +1219,392 @@ class MinecraftServerManager:
         self.root.destroy()
 
     def add_existing_server(self):
-        """添加已有服务器到列表"""
-        server_dir = filedialog.askdirectory(
-            title="选择已有服务器目录",
-            initialdir=str(Path.home())
-        )
-        
-        if not server_dir:
-            return
-            
-        server_path = Path(server_dir)
-        
-        # 验证服务器目录结构
-        if not self.validate_existing_server(server_path):
-            messagebox.showerror(
-                "错误",
-                "无效的服务器目录\n"
-                "必须包含以下文件之一:\n"
-                "- server.jar\n"
-                "- start.bat"
+        """添加已有服务器到列表（完全修复版）"""
+        try:
+            server_dir = filedialog.askdirectory(
+                title="选择已有服务器目录",
+                initialdir=str(Path.home())
             )
-            return
             
-        # 添加服务器标签页
-        tab_id = self.add_server_tab(str(server_path))
-        self.notebook.select(tab_id)
-        self.save_servers()
+            if not server_dir:
+                return
+                
+            server_path = Path(server_dir)
+            
+            # 修复：验证路径是否存在
+            if not server_path.exists():
+                messagebox.showerror("错误", "选择的路径不存在")
+                return
+            
+            # 修复：验证服务器目录
+            if not self.validate_existing_server(server_path):
+                messagebox.showerror(
+                    "错误",
+                    "无效的服务器目录\n"
+                    "目录必须包含以下文件之一:\n"
+                    "- server.jar\n" 
+                    "- start.bat\n"
+                    "- 任何.jar文件（服务器核心）"
+                )
+                return
+                
+            # 修复：检查是否已添加
+            for tab_id, tab_data in self.tabs.items():
+                existing_path = tab_data['path_var'].get()
+                if existing_path and Path(existing_path) == server_path:
+                    messagebox.showinfo("提示", "该服务器已存在列表中")
+                    self.notebook.select(tab_id)
+                    return
+            
+            # 修复：安全地添加服务器
+            tab_id = self.add_server_tab(str(server_path))
+            if not tab_id:
+                raise Exception("无法创建服务器标签页")
+                
+            # 修复：安全地选择标签页
+            def safe_select():
+                try:
+                    if tab_id in self.tabs:
+                        self.notebook.select(tab_id)
+                        self.log_to_console(tab_id, f"✅ 已添加现有服务器: {server_path.name}")
+                except Exception as e:
+                    print(f"选择标签页失败: {e}")
+            
+            self.root.after(100, lambda: self.safe_select_tab(tab_id))  # 延迟选择，确保标签页已创建
+            
+        except Exception as e:
+            error_msg = f"添加服务器失败: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("错误", error_msg)
+                
+            server_path = Path(server_dir)
+            
+            # 修复：验证路径是否存在
+            if not server_path.exists():
+                messagebox.showerror("错误", "选择的路径不存在")
+                return
+            
+            # 验证服务器目录结构
+            if not self.validate_existing_server(server_path):
+                messagebox.showerror(
+                    "错误",
+                    "无效的服务器目录\n"
+                    "必须包含以下文件之一:\n"
+                    "- server.jar\n"
+                    "- start.bat\n"
+                    "或包含有效的服务器核心文件"
+                )
+                return
+                
+            # 添加服务器标签页
+            try:
+                tab_id = self.add_server_tab(str(server_path))
+                if tab_id:
+                    self.notebook.select(tab_id)
+                    self.log_to_console(tab_id, f"✅ 已添加现有服务器: {server_path}")
+                else:
+                    messagebox.showerror("错误", "添加服务器失败")
+            except Exception as e:
+                messagebox.showerror("错误", f"添加服务器失败: {str(e)}")
         
     def validate_existing_server(self, server_path):
         """验证服务器目录是否有效"""
+        # 首先检查路径是否存在
+        if not server_path.exists():
+            return False
+        
+        # 检查是否存在任一必需文件
         required_files = [
             server_path / "server.jar",
             server_path / "start.bat"
         ]
         
+        # 检查是否有任何JAR文件（可能是服务器核心）
+        jar_files = list(server_path.glob("*.jar"))
+        
+        # 如果目录中有JAR文件，也认为是有效的服务器目录
+        if jar_files:
+            return True
+        
+        # 检查是否存在必需文件
+        return any(f.exists() for f in required_files)
+        
+    def validate_existing_server(self, server_path):
+        """验证服务器目录是否有效"""
+        # 首先检查路径是否存在
+        if not server_path.exists():
+            return False
+        
         # 检查是否存在任一必需文件
+        required_files = [
+            server_path / "server.jar",
+            server_path / "start.bat"
+        ]
+        
+        # 检查是否有任何JAR文件（可能是服务器核心）
+        jar_files = list(server_path.glob("*.jar"))
+        
+        # 如果目录中有JAR文件，也认为是有效的服务器目录
+        if jar_files:
+            return True
+        
+        # 检查是否存在必需文件
         return any(f.exists() for f in required_files)
 
+    # 以下保持原有代码不变...
+    def safe_select_tab(self, tab_id):
+        """安全选择标签页（防止Invalid slave specification错误）"""
+        try:
+            # 检查标签页是否存在且有效
+            if (tab_id in self.tabs and 
+                hasattr(self.tabs[tab_id], 'frame') and 
+                self.tabs[tab_id]['frame'].winfo_exists()):
+                
+                self.notebook.select(tab_id)
+                return True
+            else:
+                print(f"⚠️ 标签页 {tab_id} 不存在或已销毁")
+                return False
+        except Exception as e:
+            print(f"❌ 选择标签页失败: {str(e)}")
+            return False
+    
     def load_servers(self):
-        """加载已有服务器配置"""
-        if 'Servers' in self.config:
-            for server_id, path in self.config['Servers'].items():
-                if Path(path).exists():
-                    self.add_server_tab(initial_path=path)
+        """修复配置加载逻辑 - 容忍缺失的配置项"""
+        try:
+            if not self.config_file.exists():
+                print("⚠️ 配置文件不存在，跳过加载")
+                return
+                
+            # 重新读取配置文件
+            config = configparser.ConfigParser()
+            config.read(self.config_file, encoding='utf-8')
+            
+            if 'Servers' not in config:
+                print("⚠️ 配置文件中没有Servers节")
+                return
+                
+            servers_loaded = 0
+            servers_skipped = 0
+            
+            # 修复：收集所有server_开头的键
+            server_keys = [key for key in config['Servers'] if key.startswith('server_')]
+            
+            if not server_keys:
+                print("⚠️ 没有找到有效的服务器配置")
+                return
+            
+            # 按数字排序处理
+            server_keys.sort(key=lambda x: int(x.split('_')[1]) if '_' in x and x.split('_')[1].isdigit() else 0)
+            
+            for key in server_keys:
+                path = config['Servers'][key]
+                if not path or not Path(path).exists():
+                    print(f"⚠️ 路径不存在，跳过 {key}: {path}")
+                    servers_skipped += 1
+                    continue
+                    
+                try:
+                    tab_id = self.add_server_tab(path)
+                    if tab_id:
+                        servers_loaded += 1
+                        print(f"✅ 加载服务器: {key} -> {Path(path).name}")
+                    else:
+                        servers_skipped += 1
+                        print(f"❌ 创建标签页失败: {key}")
+                except Exception as e:
+                    servers_skipped += 1
+                    print(f"❌ 加载服务器失败 {key}: {str(e)}")
+            
+            print(f"📊 服务器加载完成: {servers_loaded} 成功, {servers_skipped} 失败")
+            
+        except Exception as e:
+            print(f"❌ 加载配置失败: {str(e)}")
+            # 不中断程序运行，继续启动
 
     def save_servers(self):
-        """保存服务器配置"""
-        self.config['Servers'] = {}
-        for i, (tab_id, tab_data) in enumerate(self.tabs.items()):
-            if path := tab_data['path_var'].get():
-                self.config['Servers'][f'server_{i}'] = path
-        
-        with open(self.config_file, 'w') as f:
-            self.config.write(f)
+        """修复配置保存逻辑 - 避免竞态条件删除"""
+        try:
+            # 确保配置目录存在
+            self.msm_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 创建新的配置对象
+            new_config = configparser.ConfigParser()
+            new_config['Servers'] = {}
+            
+            # 安全地保存所有有效的服务器
+            valid_servers = 0
+            for i, (tab_id, tab_data) in enumerate(self.tabs.items()):
+                path = tab_data['path_var'].get()
+                if path and Path(path).exists():
+                    new_config['Servers'][f'server_{i}'] = path
+                    valid_servers += 1
+            
+            # 使用临时文件确保原子性写入
+            temp_file = self.config_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                new_config.write(f)
+            
+            # 原子性替换
+            if self.config_file.exists():
+                self.config_file.unlink()
+            temp_file.rename(self.config_file)
+            
+            print(f"✅ 已保存 {valid_servers} 个服务器配置")
+            
+        except Exception as e:
+            print(f"❌ 保存配置失败: {str(e)}")
 
     def show_server_wizard(self):
         """显示服务器创建向导"""
         ServerCreationWizard(self.root, self.handle_server_creation)
 
     def handle_server_creation(self, server_data):
-        """处理新服务器创建请求（线程安全版）"""
+        """处理新服务器创建请求（修复版）"""
         def worker():
-            tab_id = None  # 初始化标签页ID
+            tab_id = None
             try:
                 # 准备路径
                 server_dir = Path(server_data['path']) / server_data['name']
-                core_name = f"{server_data['core_type']}-{server_data['core_version']}.jar"
                 
-                # 在主线程创建标签页（避免重复）
-                self.root.after(0, lambda: (
-                    setattr(self, '_pending_tab_id', self.add_server_tab(str(server_dir))),
-                    self.notebook.select(self._pending_tab_id)
-                ))
-                tab_id = self._pending_tab_id  # 获取创建的标签页ID
+                # 修复：确保目录存在
+                server_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 在主线程创建标签页
+                def create_tab():
+                    nonlocal tab_id
+                    try:
+                        tab_id = self.add_server_tab(str(server_dir))
+                        # 修复：检查标签页是否成功创建
+                        if tab_id and tab_id in self.tabs:
+                            self.notebook.select(tab_id)
+                            self.log_to_console(tab_id, f"✅ 服务器标签页创建成功: {tab_id}")
+                        else:
+                            raise Exception("标签页创建失败")
+                    except Exception as e:
+                        raise Exception(f"创建标签页失败: {str(e)}")
+                
+                self.root.after(0, create_tab)
+                
+                # 等待标签页创建完成
+                import time
+                timeout = 5  # 5秒超时
+                start_time = time.time()
+                while tab_id is None and time.time() - start_time < timeout:
+                    time.sleep(0.1)
+                
+                if tab_id is None:
+                    raise Exception("标签页创建超时")
                 
                 # 下载核心文件
+                core_name = f"{server_data['core_type']}-{server_data['core_version']}.jar"
                 self.root.after(0, lambda: self.log_to_console(tab_id, "开始下载服务器核心..."))
+                
                 if not self.download_core(server_data['core_url'], str(server_dir / core_name)):
                     raise Exception("核心下载失败")
                 
                 # 保存启动脚本
                 bat_path = server_dir / "start.bat"
-                self.root.after(0, lambda: (
-                    bat_path.write_text(server_data['custom_script'], encoding='utf-8'),
-                    self.log_to_console(tab_id, "启动脚本已生成")
-                ))
+                script_content = server_data['custom_script'].replace(
+                    "{core_name}", core_name
+                )
+                
+                with open(bat_path, 'w', encoding='utf-8') as f:
+                    f.write(script_content)
+                
+                self.log_to_console(tab_id, "启动脚本已生成")
                 
                 # 更新配置
                 self.root.after(0, lambda: (
                     self.save_servers(),
                     self.log_to_console(tab_id, "✅ 服务器创建完成"),
-                    messagebox.showinfo("成功", f"服务器 '{server_data['name']}' 已创建")
+                    messagebox.showinfo("成功", f"服务器 '{server_data['name']}' 已创建！\n路径: {server_dir}")
                 ))
                 
             except Exception as e:
-                if tab_id:  # 如果标签页已创建
-                    self.root.after(0, lambda: (
-                        self.log_to_console(tab_id, f"❌ 创建失败: {str(e)}"),
-                        messagebox.showerror("错误", str(e))
-                    ))
+                error_msg = f"❌ 创建失败: {str(e)}"
+                print(error_msg)
+                
                 # 清理残留文件
                 if 'server_dir' in locals() and server_dir.exists():
-                    shutil.rmtree(server_dir, ignore_errors=True)
+                    try:
+                        shutil.rmtree(server_dir, ignore_errors=True)
+                    except:
+                        pass
+                
+                # 在主线程显示错误
+                def show_error():
+                    if tab_id and tab_id in self.tabs:
+                        self.log_to_console(tab_id, error_msg)
+                    messagebox.showerror("错误", f"服务器创建失败:\n{str(e)}")
+                
+                self.root.after(0, show_error)
         
         # 启动工作线程
         threading.Thread(target=worker, daemon=True).start()
 
     def download_core(self, url, save_path):
-        """下载服务器核心文件"""
+        """下载服务器核心文件（修复版，增加完整性检查）"""
         try:
+            # 创建临时文件
+            temp_path = f"{save_path}.tmp"
+            
             response = requests.get(url, stream=True, timeout=30)
             response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
             
-            with open(save_path, 'wb') as f:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            with open(temp_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
             
+            # 修复：验证文件完整性
+            if not self.validate_jar_file(temp_path):
+                raise Exception("下载的文件损坏或不是有效的JAR文件")
+            
+            # 重命名临时文件
+            os.replace(temp_path, save_path)
+            
+            # 修复：再次验证最终文件
+            if not self.validate_jar_file(save_path):
+                raise Exception("最终文件验证失败")
+            
             return True
+            
         except Exception as e:
+            # 清理临时文件
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
             print(f"下载失败: {str(e)}")
+            return False
+
+    def validate_jar_file(self, file_path):
+        """验证JAR文件是否有效"""
+        try:
+            if not os.path.exists(file_path):
+                return False
+            
+            file_size = os.path.getsize(file_path)
+            if file_size < 1024:  # 小于1KB的文件肯定无效
+                return False
+            
+            # 检查文件头（JAR文件以PK开头）
+            with open(file_path, 'rb') as f:
+                header = f.read(4)
+                if header[:2] != b'PK':
+                    return False
+            
+            return True
+        except Exception:
             return False
 
     def edit_start_script(self, tab_id):
@@ -1226,139 +1689,341 @@ class MinecraftServerManager:
             process.pid
         )
 
+    def check_and_accept_eula(self, tab_id):
+        """检测并处理Minecraft EULA同意情况"""
+        if tab_id not in self.tabs:
+            messagebox.showerror("错误", "服务器标签页不存在")
+            return
+        
+        # 获取服务器路径
+        server_path = Path(self.tabs[tab_id]['path_var'].get())
+        if not server_path.exists():
+            messagebox.showerror("错误", "服务器路径不存在")
+            return
+        
+        # 检查EULA文件
+        eula_path = server_path / "eula.txt"
+        
+        try:
+            # 检查EULA文件是否存在
+            if not eula_path.exists():
+                self._handle_missing_eula(tab_id, eula_path)
+                return
+            
+            # 读取EULA文件内容
+            with open(eula_path, 'r', encoding='utf-8') as f:
+                eula_content = f.read()
+            
+            # 检查是否已同意EULA
+            if 'eula=true' in eula_content.lower():
+                messagebox.showinfo("EULA状态", "✅ Minecraft EULA 已同意")
+            elif 'eula=false' in eula_content.lower():
+                self._handle_unaccepted_eula(tab_id, eula_path)
+            else:
+                # EULA文件格式异常
+                self._handle_corrupted_eula(tab_id, eula_path)
+                
+        except Exception as e:
+            messagebox.showerror("错误", f"检查EULA时发生错误:\n{str(e)}")
+
+    def _handle_missing_eula(self, tab_id, eula_path):
+        """处理缺失EULA文件的情况"""
+        server_name = tab_id
+        
+        # 显示EULA内容预览
+        eula_text = self._get_eula_content()
+        
+        result = messagebox.askyesno(
+            "Minecraft EULA 同意",
+            f"服务器 '{server_name}' 未找到EULA文件。\n\n"
+            f"Minecraft服务器需要您同意Minecraft EULA才能运行。\n\n"
+            f"EULA主要内容预览:\n"
+            f"• 您同意遵守Minecraft最终用户许可协议\n"
+            f"• 您对服务器的运行和使用负责\n"
+            f"• 禁止运行未经授权的商业服务器\n\n"
+            f"完整EULA请参考: https://aka.ms/MinecraftEULA\n\n"
+            f"是否同意Minecraft EULA并创建eula.txt文件？",
+            icon='question'
+        )
+        
+        if result:
+            self._create_eula_file(eula_path, True)
+            self.log_to_console(tab_id, "✅ 已同意Minecraft EULA")
+            messagebox.showinfo("成功", "EULA文件已创建并设置为已同意")
+        else:
+            self.log_to_console(tab_id, "❌ 用户未同意Minecraft EULA")
+
+    def _handle_unaccepted_eula(self, tab_id, eula_path):
+        """处理未同意EULA的情况"""
+        server_name = tab_id
+        
+        result = messagebox.askyesno(
+            "Minecraft EULA 同意",
+            f"服务器 '{server_name}' 的EULA尚未同意。\n\n"
+            f"当前状态: eula=false\n\n"
+            "Minecraft服务器需要您同意EULA才能正常运行。\n\n"
+            "是否现在同意Minecraft EULA？",
+            icon='warning'
+        )
+        
+        if result:
+            self._create_eula_file(eula_path, True)
+            self.log_to_console(tab_id, "✅ 已同意Minecraft EULA")
+            messagebox.showinfo("成功", "EULA已更新为同意状态")
+        else:
+            self.log_to_console(tab_id, "⚠️ EULA仍保持未同意状态")
+
+    def _handle_corrupted_eula(self, tab_id, eula_path):
+        """处理损坏的EULA文件"""
+        server_name = tab_id
+        
+        result = messagebox.askyesno(
+            "EULA文件异常",
+            f"服务器 '{server_name}' 的EULA文件格式异常。\n\n"
+            "是否重新创建EULA文件并设置为同意？",
+            icon='error'
+        )
+        
+        if result:
+            self._create_eula_file(eula_path, True)
+            self.log_to_console(tab_id, "✅ 已修复并同意EULA")
+            messagebox.showinfo("成功", "EULA文件已修复")
+        else:
+            # 备份原文件
+            backup_path = eula_path.with_suffix('.txt.bak')
+            try:
+                shutil.copy2(eula_path, backup_path)
+                self.log_to_console(tab_id, f"⚠️ 原EULA文件已备份至: {backup_path.name}")
+            except:
+                pass
+
+    def _get_eula_content(self):
+        """获取EULA内容摘要"""
+        return """#Minecraft EULA 摘要
+    • 您必须遵守Minecraft最终用户许可协议
+    • 您对服务器的运行和使用负全部责任
+    • 禁止运行未经授权的商业服务器
+    • 必须遵守Mojang的商业模式指南
+
+    完整EULA内容请参考: https://aka.ms/MinecraftEULA"""
+
+    def _create_eula_file(self, eula_path, accepted=True):
+        """创建或更新EULA文件"""
+        eula_content = f"""#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
+    #{datetime.datetime.now().strftime('%a %b %d %H:%M:%S %Z %Y')}
+    eula={str(accepted).lower()}
+    """
+        
+        # 确保目录存在
+        eula_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 写入EULA文件
+        with open(eula_path, 'w', encoding='utf-8') as f:
+            f.write(eula_content)
+
+    def auto_check_eula_on_start(self, tab_id):
+        """启动服务器时自动检查EULA（在start_server方法中调用）"""
+        server_path = Path(self.tabs[tab_id]['path_var'].get())
+        eula_path = server_path / "eula.txt"
+        
+        # 检查EULA是否存在且已同意
+        if eula_path.exists():
+            try:
+                with open(eula_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    if 'eula=true' in content.lower():
+                        return True  # EULA已同意，可以启动
+            except:
+                pass
+        
+        # EULA未同意，提示用户
+        self.root.after(0, lambda: self._prompt_eula_before_start(tab_id))
+        return False
+
+    def _prompt_eula_before_start(self, tab_id):
+        """启动前提示EULA同意"""
+        server_name = tab_id
+        server_path = Path(self.tabs[tab_id]['path_var'].get())
+        eula_path = server_path / "eula.txt"
+        
+        result = messagebox.askyesno(
+            "Minecraft EULA 同意",
+            f"启动服务器 '{server_name}' 需要同意Minecraft EULA。\n\n"
+            "是否现在同意EULA并启动服务器？",
+            icon='question'
+        )
+        
+        if result:
+            self._create_eula_file(eula_path, True)
+            self.log_to_console(tab_id, "✅ 已同意Minecraft EULA")
+            # 延迟启动服务器，确保EULA文件已写入
+            self.root.after(100, lambda: self._delayed_start_server(tab_id))
+        else:
+            self.log_to_console(tab_id, "❌ 启动取消：未同意Minecraft EULA")
+
+    def _delayed_start_server(self, tab_id):
+        """延迟启动服务器（确保EULA文件已保存）"""
+        self.start_server(tab_id)
+
     def add_server_tab(self, initial_path=None):
-        """添加新的服务器标签页"""
-        # 生成唯一ID
-        tab_id = f"server_{len(self.tabs) + 1}"
-        tab_frame = ttk.Frame(self.notebook)
-        self.notebook.add(tab_frame, text=Path(initial_path).name if initial_path else "新服务器")
-        
-        # 路径变量
-        path_var = tk.StringVar(value=initial_path)
-        path_var.trace_add('write', lambda *args: self.save_servers())
-        
-        # 控制按钮区域
-        control_frame = ttk.Frame(tab_frame)
-        control_frame.pack(fill=tk.X, pady=5, padx=5)
-        
-        # 启动按钮
-        start_btn = ttk.Button(
-            control_frame,
-            text="启动",
-            command=lambda: self.start_server(tab_id)
-        )
-        start_btn.pack(side=tk.LEFT, padx=2)
-        
-        # 停止按钮
-        stop_btn = ttk.Button(
-            control_frame,
-            text="停止",
-            command=lambda: self.stop_server(tab_id),
-            state=tk.DISABLED
-        )
-        stop_btn.pack(side=tk.LEFT, padx=2)
-        
-        # 重启按钮
-        restart_btn = ttk.Button(
-            control_frame,
-            text="重启",
-            command=lambda: self.restart_server(tab_id),
-            state=tk.DISABLED
-        )
-        restart_btn.pack(side=tk.LEFT, padx=2)
-        
-        # 编辑server.properties按钮
-        edit_prop_btn = ttk.Button(
-            control_frame,
-            text="编辑 server.properties",
-            command=lambda: self.edit_server_properties(tab_id)
-        )
-        edit_prop_btn.pack(side=tk.LEFT, padx=2)
-
-        edit_script_btn = ttk.Button(
-            control_frame,
-            text="编辑启动脚本",
-            command=lambda: self.edit_start_script(tab_id)
-        )
-        edit_script_btn.pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            control_frame,
-            text="监控资源",
-            command=lambda: self.start_resource_monitor(tab_id)
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            control_frame,
-            text="帮助...",
-            command=lambda: webbrowser.open("http://xg-2.frp.one:12935")
-        ).pack(side=tk.RIGHT, padx=5)
-        
-        # 路径显示与浏览
-        path_frame = ttk.Frame(tab_frame)
-        path_frame.pack(fill=tk.X, padx=5)
-        
-        ttk.Label(path_frame, text="服务器路径:").pack(side=tk.LEFT)
-        ttk.Entry(path_frame, textvariable=path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        ttk.Button(
-            path_frame,
-            text="浏览",
-            command=lambda: self.browse_server_path(tab_id)
-        ).pack(side=tk.RIGHT, padx=5)
-        
-        # 日志区域
-        log_frame = ttk.LabelFrame(tab_frame, text="控制台输出")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        log_scrollbar = ttk.Scrollbar(log_frame)
-        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        log_text = tk.Text(
-            log_frame,
-            wrap=tk.WORD,
-            yscrollcommand=log_scrollbar.set,
-            state=tk.DISABLED,
-            bg="#1a1a1a",
-            fg="#ffffff",
-            insertbackground="#ffffff"
-        )
-        log_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-        log_scrollbar.config(command=log_text.yview)
-        
-        # 指令输入区域
-        command_frame = ttk.Frame(tab_frame)
-        command_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Label(command_frame, text="指令:").pack(side=tk.LEFT, padx=5)
-        self.command_var = tk.StringVar()
-        command_entry = ttk.Entry(command_frame, textvariable=self.command_var)
-        command_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # 发送指令按钮
-        send_btn = ttk.Button(
-            command_frame,
-            text="发送",
-            command=lambda: self.send_command(tab_id)
-        )
-        send_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # 绑定回车键发送指令
-        command_entry.bind('<Return>', lambda event: self.send_command(tab_id))
-        
-        # 保存标签数据
-        self.tabs[tab_id] = {
-            'frame': tab_frame,
-            'path_var': path_var,
-            'start_btn': start_btn,
-            'stop_btn': stop_btn,
-            'restart_btn': restart_btn,
-            'log_text': log_text,
-            'status_var': tk.StringVar(value="已停止"),
-            'edit_script_btn': edit_script_btn,
-            'command_var': self.command_var
-        }
-        
-        return tab_id
+        """添加新的服务器标签页（修复版）"""
+        try:
+            # 生成唯一ID
+            tab_id = f"server_{len(self.tabs)}"
+                
+            # 修复：检查路径有效性
+            if initial_path and not Path(initial_path).exists():
+                # 创建目录
+                Path(initial_path).mkdir(parents=True, exist_ok=True)
+                
+            tab_frame = ttk.Frame(self.notebook)
+            display_name = Path(initial_path).name if initial_path else "新服务器"
+                
+            # 修复：确保标签页名称不为空
+            if not display_name or display_name == ".":
+                display_name = "新服务器"
+                    
+            self.notebook.add(tab_frame, text=display_name)
+                
+            # 路径变量
+            path_var = tk.StringVar(value=initial_path or "")
+            path_var.trace_add('write', lambda *args: self.save_servers())
+                
+            # 控制按钮区域
+            control_frame = ttk.Frame(tab_frame)
+            control_frame.pack(fill=tk.X, pady=5, padx=5)
+            
+            # 启动按钮
+            start_btn = ttk.Button(
+                control_frame,
+                text="启动",
+                command=lambda: self.start_server(tab_id)
+            )
+            start_btn.pack(side=tk.LEFT, padx=2)
+            
+            # 停止按钮
+            stop_btn = ttk.Button(
+                control_frame,
+                text="停止",
+                command=lambda: self.stop_server(tab_id),
+                state=tk.DISABLED
+            )
+            stop_btn.pack(side=tk.LEFT, padx=2)
+            
+            # 重启按钮
+            restart_btn = ttk.Button(
+                control_frame,
+                text="重启",
+                command=lambda: self.restart_server(tab_id),
+                state=tk.DISABLED
+            )
+            restart_btn.pack(side=tk.LEFT, padx=2)
+            
+            # 编辑server.properties按钮
+            edit_prop_btn = ttk.Button(
+                control_frame,
+                text="编辑 server.properties",
+                command=lambda: self.edit_server_properties(tab_id)
+            )
+            edit_prop_btn.pack(side=tk.LEFT, padx=2)
+            # 编辑启动脚本按钮
+            edit_script_btn = ttk.Button(
+                control_frame,
+                text="编辑启动脚本",
+                command=lambda: self.edit_start_script(tab_id)
+            )
+            edit_script_btn.pack(side=tk.LEFT, padx=5)
+            # 监控资源按钮
+            ttk.Button(
+                control_frame,
+                text="监控资源",
+                command=lambda: self.start_resource_monitor(tab_id)
+            ).pack(side=tk.LEFT, padx=5)
+            # EULA
+            ttk.Button(
+                control_frame,
+                text="EULA",
+                command=lambda: self.check_and_accept_eula(tab_id)
+            ).pack(side=tk.LEFT, padx=5)
+            # 帮助按钮
+            ttk.Button(
+                control_frame,
+                text="帮助...",
+                command=lambda: webbrowser.open("http://xg-2.frp.one:12935")
+            ).pack(side=tk.RIGHT, padx=5)
+            
+            # 路径显示与浏览
+            path_frame = ttk.Frame(tab_frame)
+            path_frame.pack(fill=tk.X, padx=5)
+            
+            ttk.Label(path_frame, text="服务器路径:").pack(side=tk.LEFT)
+            path_entry = ttk.Entry(path_frame, textvariable=path_var)
+            path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            ttk.Button(
+                path_frame,
+                text="浏览",
+                command=lambda: self.browse_server_path(tab_id)
+            ).pack(side=tk.RIGHT, padx=5)
+            
+            # 日志区域
+            log_frame = ttk.LabelFrame(tab_frame, text="控制台输出")
+            log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            log_scrollbar = ttk.Scrollbar(log_frame)
+            log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            log_text = tk.Text(
+                log_frame,
+                wrap=tk.WORD,
+                yscrollcommand=log_scrollbar.set,
+                state=tk.DISABLED,
+                bg="#1a1a1a",
+                fg="#ffffff",
+                insertbackground="#ffffff"
+            )
+            log_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+            log_scrollbar.config(command=log_text.yview)
+            
+            # 指令输入区域
+            command_frame = ttk.Frame(tab_frame)
+            command_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            ttk.Label(command_frame, text="指令:").pack(side=tk.LEFT, padx=5)
+            command_var = tk.StringVar()
+            command_entry = ttk.Entry(command_frame, textvariable=command_var)
+            command_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            # 发送指令按钮
+            send_btn = ttk.Button(
+                command_frame,
+                text="发送",
+                command=lambda: self.send_command(tab_id)
+            )
+            send_btn.pack(side=tk.RIGHT, padx=5)
+            
+            # 绑定回车键发送指令
+            command_entry.bind('<Return>', lambda event: self.send_command(tab_id))
+            
+            # 保存标签数据
+            self.tabs[tab_id] = {
+                'frame': tab_frame,
+                'path_var': path_var,
+                'start_btn': start_btn,
+                'stop_btn': stop_btn,
+                'restart_btn': restart_btn,
+                'log_text': log_text,
+                'command_var': command_var,
+                'status_var': tk.StringVar(value="已停止")
+            }
+            
+            # 立即保存配置
+            self.save_servers()
+            
+            return tab_id
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"创建标签页失败: {str(e)}")
+            return None
 
     def browse_server_path(self, tab_id):
         """浏览服务器路径"""
@@ -1666,4 +2331,4 @@ if __name__ == "__main__":
     app = MinecraftServerManager(root)
     root.mainloop()
 
-#帮助...
+#add_existing_server
