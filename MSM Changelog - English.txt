@@ -1,0 +1,45 @@
+[ Minecraft Server Manager Changelog | 25.11.1 ]
+
+131230
+
+-v1.1
+[Fix] Fixed bug where a new tab would be created even if server creation failed
+[Fix] Fixed instability bug when downloading server core
+[Interface Change/Optimization] Server creation wizard interface updated; server core now automatically fetched from the official website, no longer reliant on local URL storage
+[New Feature] Added one-click acceptance of Minecraft EULA (Minecraft Server Management Agreement)
+[Fix] Fixed bug where server configuration was not saved when closing the application
+
+-v1.0-T2510061206
+[Fix] Fixed bug that prevented opening the help webpage
+[Beta Warning] Downloading server core is unstable in this beta version
+
+-v1.0
+[Fix] Fixed bug that prevented downloading the server core
+[New Feature] Support for editing the server.properties configuration file
+[New Feature] Support for editing startup scripts
+[New Feature] Support for viewing server resource usage
+[New Feature] Added Vanilla 1.20.1 / 1.20.4 / 1.21 / 1.21.4 / 1.21.8 server cores
+[New Feature] Added "Help" button to open help webpage when assistance is needed (not available offline)
+[Interface Change/Optimization] Added the word "Command:" beside the command input box
+
+-b2.4
+[New Feature] When MSM is closed, all servers will be forcibly shut down
+[Fix] Fixed bug where some servers could not be closed in certain situations
+[New Feature] MSM icon now displays simultaneously on the window and taskbar
+
+-b2.3
+[Fix] Fixed bug causing garbled ANSI color codes in Paper server command prompt echo
+[New Feature] Warnings and errors from the server are now displayed via popup windows
+[New Feature] "Delete Server" function re-added to the window
+[Interface Change/Optimization] "Create" button in the new server window is no longer obstructed by the configuration frame
+
+-b2.2
+[Fix] Fixed bug where progress was not shown when downloading server core
+[Fix] Fixed bug where window would freeze during server core download
+[New Feature] Now you can add an existing server path to MSM.ini
+[Fix] Fixed bug where .exe file launching server would show command prompt window
+
+-b2.1
+[New Feature] Added functionality to set custom server path in new server window
+[Fix] Fixed bug where server command input box was not visible
+[Fix] Fixed bug where interrupted core download would create 2 empty tabs
