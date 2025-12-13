@@ -1,6 +1,7 @@
 [ Minecraft Server Manager Changelog | 25.11.1 ]
 
-131230
+-v1.2
+[Warning] English is no longer supported starting from version 1.2
 
 -v1.1
 [Fix] Fixed bug where a new tab would be created even if server creation failed
@@ -43,3 +44,4 @@
 [New Feature] Added functionality to set custom server path in new server window
 [Fix] Fixed bug where server command input box was not visible
 [Fix] Fixed bug where interrupted core download would create 2 empty tabs
+
