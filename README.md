@@ -83,7 +83,7 @@
 
 ### 配置文件
 - 程序配置存储在：`%USERPROFILE%\.msm\MSM.ini`
-- 服务器配置存储在各自目录的 `msm_config.json` 中。
+- 服务器配置存储在各自目录中的 `msm_config.json`。
 
 ## 🐛 故障排除
 
