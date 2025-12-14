@@ -118,7 +118,7 @@
 ## 📞 支持
 
 如有问题请提交：
-- [GitHub Issues]((https://github.com/YuanChi-123/MinecraftServerManager/issues))
+- [GitHub Issues](https://github.com/YuanChi-123/MinecraftServerManager/issues)
 - 邮箱: yangyuanchi2024_2@163.com
 
 ---
