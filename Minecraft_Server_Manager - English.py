@@ -1116,6 +1116,8 @@ class MinecraftServerManager:
             self.root = root
             self.root.title("Minecraft Server Manager v1.1")
             self.root.geometry("800x600")
+
+            messagebox.showwarning("Warning", "The English version will no longer be supported as of December 15, 2025.")
             
             # 图标设置
             icon_path = r"download.ico"
@@ -2330,5 +2332,6 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = MinecraftServerManager(root)
     root.mainloop()
+
 
 #add_existing_server
