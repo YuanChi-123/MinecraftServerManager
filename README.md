@@ -7,6 +7,10 @@
 
 一个功能完整的 Minecraft 服务器管理工具，提供直观的图形界面，让服务器管理变得简单高效。
 
+## 新消息
+- **v1.2 版本** - MSM 1.2 正式版更新！详情请查看更新日志
+- **英语版本停止支持** - 英文版本已于 2025年12月15日不再支持（The English version will no longer be supported as of December 15, 2025）
+
 ## ✨ 主要特性
 
 ### 🚀 核心功能
