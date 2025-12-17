@@ -13,7 +13,7 @@ import time
 import psutil
 from collections import deque
 import webbrowser
-import datetime #帮助
+import datetime
 
 class ResourceMonitorWindow:
     def __init__(self, parent, server_tab_id, process_pid):
@@ -1708,8 +1708,6 @@ class ServerCreationWizard:
         default_script = """@echo off
 title Minecraft Server - %CD%
 java -Xms1G -Xmx2G -jar {core_name} nogui
-echo Server has stopped.
-echo Press any key to exit...
 pause >nul"""
         self.script_text.insert(tk.END, default_script)
         
@@ -3099,7 +3097,7 @@ class MinecraftServerManager:
 
     def _handle_missing_eula(self, tab_id, eula_path):
         """处理缺失EULA文件的情况"""
-        server_name = tab_id
+        server_name = tab_id #check_and_accept_eula
         
         # 显示EULA内容预览
         eula_text = self._get_eula_content()
@@ -3123,6 +3121,25 @@ class MinecraftServerManager:
             messagebox.showinfo("成功", "EULA文件已创建并设置为已同意")
         else:
             self.log_to_console(tab_id, "❌ 用户未同意Minecraft EULA")
+
+    def _handle_unaccepted_eula(self, tab_id, eula_path):
+        """处理未接受的EULA文件"""
+        server_name = tab_id
+        
+        result = messagebox.askyesno(
+            "Minecraft EULA 同意",
+            f"服务器 '{server_name}' 的EULA文件设置为未同意。\n\n"
+            f"是否现在同意Minecraft EULA？\n\n"
+            f"同意后将修改eula.txt文件中的eula=false为eula=true",
+            icon='question'
+        )
+        
+        if result:
+            self._create_eula_file(eula_path, True)
+            self.log_to_console(tab_id, "✅ 已同意Minecraft EULA")
+            messagebox.showinfo("成功", "EULA文件已更新为已同意状态")
+        else:
+            self.log_to_console(tab_id, "❌❌ 用户未同意Minecraft EULA")
 
     def _get_eula_content(self):
         """获取EULA内容摘要"""
@@ -4209,4 +4226,3 @@ if __name__ == "__main__":
     app = MinecraftServerManager(root)
     root.mainloop()
 
-#监控资源
