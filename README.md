@@ -3,7 +3,7 @@
 一个功能完整的 Minecraft 服务器管理工具，提供直观的图形界面，让服务器管理变得简单高效。
 
 ## 🔍 新消息
-- **v1.3 版本** - MSM 1.2 正式版更新！详情请查看更新日志
+- **v1.3 版本** - MSM 1.3 正式版更新！详情请查看更新日志
 - **英语版本停止支持** -英文版本已于 2025年12月15日 不再支持直到作者找到一个靠谱的翻译（The English version will no longer be supported from December 15, 2025, until the author finds a reliable translator.）
 - **v1.4 版本开始征集意见** - 征集大家对 MSM 的意见，与大家携手共进
 
@@ -28,7 +28,7 @@
 ### 系统要求
 - **操作系统**: Windows 7/10/11
 - **Python**: 3.8 或更高版本（仅运行源码时需要）
-- **requests、psutil**：仅运行源码时需要
+- **Python 库（requests、psutil）**：仅运行源码时需要
 - **Java**: 8 或更高版本（运行 Minecraft 服务器必需）
 
 ## 📖 使用指南
@@ -82,8 +82,8 @@
 - 命令输入和历史
 
 ### 配置文件
-- 程序配置存储在：`%USERPROFILE%\.msm\MSM.ini`
-- 服务器配置存储在各自目录中的 `msm_config.json`
+- 程序配置存储位置：`%USERPROFILE%\.msm\MSM.ini`
+- 服务器配置存储位置：各自目录中的 `msm_config.json`
 
 ## 🐛 故障排除
 
@@ -92,6 +92,7 @@
 **Q：服务器启动失败**
 - 检查 Java 安装（提示“'java'不是一个命令，也不是一个有效的文件'”时）：`java -version`
 - 检查端口占用：`netstat -ano |  findstr :25565`
+  *使用 Windows PowerShell 或命令提示符*
   
 **Q：文件被占用错误**
 - 程序会自动尝试清理锁文件
@@ -124,3 +125,5 @@
 ---
 
 **让 Minecraft 服务器管理变得更加简单！** 🎯
+
+*更新于 2025.12.17 20:00*
