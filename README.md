@@ -3,11 +3,12 @@
 一个功能完整的 Minecraft 服务器管理工具，提供直观的图形界面，让服务器管理变得简单高效。
 
 ## 🔍 新消息
-- **v1.3 版本** - MSM 1.3 正式版更新！详情请查看更新日志
-- **英语版本停止支持** -英文版本已于 2025年12月15日 不再支持直到作者找到一个靠谱的翻译（The English version will no longer be supported from December 15, 2025, until the author finds a reliable translator.）
-- **v1.4 版本开始征集意见** - 征集大家对 MSM 的意见，与大家携手共进
+- **最新正式版** - Minecraft Server Manager v1.3 正式版更新！详情请查看更新日志
+- **英语版本停止支持** - 英文版本已于 2025年12月15日 不再支持直到作者找到一个靠谱的翻译（The English version will no longer be supported from December 15, 2025, until the author finds a reliable translator）
+- **v1.4 版本开始征集意见** - 征集大家对 Minecraft Server Manager 的意见，与大家携手共进
    - **GitHub Issues** - [GitHub Issues](https://github.com/YuanChi-123/MinecraftServerManager/issues)
    - **邮箱** - yangyuanchi2024_2@163.com
+- **翻译征集** - 征集 Minecraft Server Manager 的英文版翻译（Recruiting translators）
 
 ## ✨ 主要特性
 
@@ -127,5 +128,3 @@
 ---
 
 **让 Minecraft 服务器管理变得更加简单！** 🎯
-
-*更新于 2025.12.17 20:00*
