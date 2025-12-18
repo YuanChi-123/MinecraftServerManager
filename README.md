@@ -95,7 +95,7 @@
 **Q：服务器启动失败**
 - 检查 Java 安装（提示“'java'不是一个命令，也不是一个有效的文件'”时）：`java -version`
 - 检查端口占用：`netstat -ano |  findstr :25565`
-  *使用 Windows PowerShell 或命令提示符*
+- *使用 Windows PowerShell 或命令提示符*
   
 **Q：文件被占用错误**
 - 程序会自动尝试清理锁文件
