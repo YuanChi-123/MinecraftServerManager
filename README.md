@@ -6,6 +6,8 @@
 - **v1.3 版本** - MSM 1.3 正式版更新！详情请查看更新日志
 - **英语版本停止支持** -英文版本已于 2025年12月15日 不再支持直到作者找到一个靠谱的翻译（The English version will no longer be supported from December 15, 2025, until the author finds a reliable translator.）
 - **v1.4 版本开始征集意见** - 征集大家对 MSM 的意见，与大家携手共进
+   - **GitHub Issues** - [GitHub Issues](https://github.com/YuanChi-123/MinecraftServerManager/issues)
+   - **邮箱** - yangyuanchi2024_2@163.com
 
 ## ✨ 主要特性
 
