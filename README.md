@@ -1,4 +1,5 @@
 # Minecraft Server Manager (MSM) 🎮
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 
 一个功能完整的 Minecraft 服务器管理工具，提供直观的图形界面，让服务器管理变得简单高效。
 
